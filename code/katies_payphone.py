@@ -73,21 +73,26 @@ GPIO.setup(HOOK, GPIO.IN, pull_up_down = GPIO.PUD_DOWN)
 GPIO.setup(EXIT, GPIO.IN, pull_up_down = GPIO.PUD_UP)
 
 # DEBUG CONSTANTS
-DEBUG_RAWADC 	= 0
+DEBUG_RAWADC 	= 1
 DEBUG_PRESSED 	= 1
 DEBUG_HOOK 		= 1
 
 # GLOBAL VARS
-MENU = 0
+MENU = []
+PLAYBACK_INDEX = 0
 
 #------------------------------------------ UTILITY FUNCTIONS ------------------------------------------
 
+# phoneIsOffHook: Return false if hung up, true if line is open.
+def phoneIsOffHook():
+	return GPIO.input(HOOK) == 1
+
 # Play wav file on the attached system sound device
 def play_wav(wav_filename):
-	global p
+	global playback_process
 	msg = "playing " + ", ".join(wav_filename)
 	logger.debug(msg)
-	p = subprocess.Popen(
+	playback_process = subprocess.Popen(
 		['aplay','-i','-D','plughw:1'] + wav_filename,
 		stdin = subprocess.PIPE,
 		stdout = subprocess.PIPE,
@@ -97,15 +102,15 @@ def play_wav(wav_filename):
 
 # record wav file on the attached system sound device
 def record_wav(wav_filename):
-	global r
-	r = subprocess.Popen(
+	global recording_process
+	recording_process = subprocess.Popen(
 		['arecord','-f','cd','-d','30','-t','wav','-D','plughw:1','--max-file-time','30',wav_filename],
 		stdin = subprocess.PIPE,
 		stdout = subprocess.PIPE,
 		stderr = subprocess.STDOUT,
 		shell = False
 	)
-	print(r.stdout.read())
+	print(recording_process.stdout.read())
 
 # find a random file in the recordings to play
 def find_file(path):
@@ -119,316 +124,17 @@ def find_file(path):
 	#print(filename)
 	return filename
 
-#------------------------------------------ KEYPAD ------------------------------------------
-
-# determine what to do when a button is pressed
-def button_pressed(channel):
+# restart: return to main menu.
+def restart(channel):
 	global MENU
-	if GPIO.input(HOOK) == 1:
-		btnval = readadc(0, SPICLK, SPIMOSI, SPIMISO, SPICS) # check value of ADC
-		if DEBUG_RAWADC:
-			print ("btnval:", btnval)
-			
-		if btnval > 980: # 1
-			if p.poll() == None:
-				p.kill()
-			# English selected
-			if MENU == -1:
-				if DEBUG_PRESSED:
-					print("1 ENGLISH")
-					logger.debug("1")
-				MENU = 1
-				play_wav(["/media/pi/WONDERPHONE/prompts/en/MainMenu.wav"])
-			# English selected --> Story from Dallas' Past
-			elif MENU == 1:
-				if DEBUG_PRESSED:
-					print("11 Story from Dallas' Past.")
-					logger.debug("11")
-				MENU = 11
-				play_wav(["/media/pi/WONDERPHONE/prompts/en/Menu1.wav", "/media/pi/WONDERPHONE/stories/1/PersonalStory.wav"])
-			# Spanish selected --> Story from Dallas' Past
-			elif MENU == 2:
-				if DEBUG_PRESSED:
-					print("21 Story from Dallas' Past. (Spanish)")
-					logger.debug("21")
-				MENU = 21
-				play_wav(["/media/pi/WONDERPHONE/prompts/es/Menu1.wav","/media/pi/WONDERPHONE/stories/1/PersonalStory.wav"])
-			# English selected --> Personal Prompt --> Recording
-			elif MENU == 17:
-				if DEBUG_PRESSED:
-					print("171 Recording Personal Prompt.")
-					logger.debug("171")
-				MENU = 171
-				play_wav(["/media/pi/WONDERPHONE/prompts/recordtone.wav"])
-				p.wait()
-				year, month, day, hour, minute, second = time.strftime("%Y,%m,%d,%H,%M,%S").split(',')
-				savename = "/media/pi/WONDERPHONE/recordings/en/" + year + month + day + "-" + hour + minute + second + ".wav"
-				print("recording started")
-				logger.debug("recording started")
-				record_wav(savename)
-				print("recording stopped")
-				logger.debug("recording stopped")
-				play_wav(["/media/pi/WONDERPHONE/prompts/en/Finish7.wav"])
-			# Spanish selected --> Personal Prompt --> Recording
-			elif MENU == 27:
-				if DEBUG_PRESSED:
-					print("271 Recording Personal Prompt. (Spanish)")
-					logger.debug("271")
-				MENU = 271
-				play_wav(["/media/pi/WONDERPHONE/prompts/recordtone.wav"])
-				p.wait()
-				year, month, day, hour, minute, second = time.strftime("%Y,%m,%d,%H,%M,%S").split(',')
-				savename = "/media/pi/WONDERPHONE/recordings/es/" + year + month + day + "-" + hour + minute + second + ".wav"
-				print("recording started")
-				logger.debug("recording started")
-				record_wav(savename)
-				print("recording stopped")
-				logger.debug("recording stopped")
-				play_wav(["/media/pi/WONDERPHONE/prompts/es/Finish7.wav"])
-			else:
-				print("New menu val " + str(math.floor(MENU/10)))
-				while(MENU > 2):
-					MENU = math.floor(MENU/10)
+	global PLAYBACK_INDEX
+	global IS_FIRST_PLAYBACK
 	
-		if btnval > 870 and btnval < 910: # 2
-			if p.poll() == None:
-				p.kill()
-			# Spanish selected
-			if MENU == -1:
-				if DEBUG_PRESSED:
-					print("2 SPANISH")
-					logger.debug("2")
-				MENU = 2
-				play_wav(["/media/pi/WONDERPHONE/prompts/es/MainMenu.wav"])
-			# English selected --> Story about Dallas' Future
-			elif MENU == 1:
-				if DEBUG_PRESSED:
-					print("12 Story about Dallas' Future.")
-					logger.debug("12")
-				MENU = 12
-				play_wav(["/media/pi/WONDERPHONE/prompts/en/Menu2.wav", "/media/pi/WONDERPHONE/stories/2/FutureStory.wav"])
-			# Spanish selected --> Story about Dallas' Future
-			elif MENU == 2:
-				if DEBUG_PRESSED:
-					print("22 Story about Dallas' Future. (Spanish)")
-					logger.debug("22")
-				MENU = 22
-				play_wav(["/media/pi/WONDERPHONE/prompts/es/Menu2.wav", "/media/pi/WONDERPHONE/stories/2/FutureStory.wav"])
-			
-		if btnval > 760 and btnval < 810: # 3
-			if p.poll() == None:
-				p.kill()
-			# English selected --> Action Prompt
-			if MENU == 1:
-				if DEBUG_PRESSED:
-					print("13 Action Prompt.")
-					logger.debug("13")
-				MENU = 13
-				play_wav(["/media/pi/WONDERPHONE/prompts/en/Menu3.wav", "/media/pi/WONDERPHONE/prompts/en/Prompt3.wav"])
-			# Spanish selected --> Action Prompt
-			elif MENU == 2:
-				if DEBUG_PRESSED:
-					print("23 Action Prompt. (Spanish)")
-					logger.debug("23")
-				MENU = 23
-				play_wav(["/media/pi/WONDERPHONE/prompts/es/Menu3.wav", "/media/pi/WONDERPHONE/prompts/es/Prompt3.wav"])
-				
-		if btnval > 700 and btnval < 750: # 4
-			if p.poll() == None:
-				p.kill()
-			# English selected --> Historical Wonder
-			if MENU == 1:
-				if DEBUG_PRESSED:
-					print("14 Historical Wonder.")
-					logger.debug("14")
-				MENU = 14
-				play_wav(["/media/pi/WONDERPHONE/prompts/en/Menu4.wav", "/media/pi/WONDERPHONE/stories/4/HistoryStory.wav"])
-			# Spanish selected --> Action Prompt
-			elif MENU == 2:
-				if DEBUG_PRESSED:
-					print("24 Historical Wonder. (Spanish)")
-					logger.debug("24")
-				MENU = 24
-				play_wav(["/media/pi/WONDERPHONE/prompts/es/Menu4.wav", "/media/pi/WONDERPHONE/stories/4/HistoryStory.wav"])
-				
-		if btnval > 650 and btnval < 670: # 5
-			if p.poll() == None:
-				p.kill()
-			# English selected --> Architectural Wonder
-			if MENU == 1:
-				if DEBUG_PRESSED:
-					print("15 Architectural Wonder.")
-					logger.debug("15")
-				MENU = 15
-				play_wav(["/media/pi/WONDERPHONE/prompts/en/Menu5.wav", "/media/pi/WONDERPHONE/stories/5/ArchitectureStory.wav"])
-			# Spanish selected --> Architectural Wonder
-			elif MENU == 2:
-				if DEBUG_PRESSED:
-					print("25 Architectural Wonder. (Spanish)")
-					logger.debug("25")
-				MENU = 25
-				play_wav(["/media/pi/WONDERPHONE/prompts/es/Menu5.wav", "/media/pi/WONDERPHONE/stories/5/ArchitectureStory.wav"])
-				
-		if btnval > 580 and btnval < 610: # 6
-			if p.poll() == None:
-				p.kill()
-			# English selected --> Musical Wonder
-			if MENU == 1:
-				if DEBUG_PRESSED:
-					print("16 Musical Wonder.")
-					logger.debug("16")
-				MENU = 16
-				play_wav(["/media/pi/WONDERPHONE/prompts/en/Menu6.wav", "/media/pi/WONDERPHONE/stories/6/GarageGrooves1.wav"])
-			# Spanish selected --> Musical Wonder
-			elif MENU == 2:
-				if DEBUG_PRESSED:
-					print("26 Musical Wonder. (Spanish)")
-					logger.debug("26")
-				MENU = 26
-				play_wav(["/media/pi/WONDERPHONE/prompts/es/Menu6.wav", "/media/pi/WONDERPHONE/stories/6/GarageGrooves1.wav"])
-				
-		if btnval > 540 and btnval < 570: # 7
-			if p.poll() == None:
-				p.kill()
-			# English selected --> Personal Prompt
-			if MENU == 1:
-				if DEBUG_PRESSED:
-					print("17 Personal Prompt.")
-					logger.debug("17")
-				MENU = 17
-				play_wav(["/media/pi/WONDERPHONE/prompts/en/Menu7.wav", "/media/pi/WONDERPHONE/prompts/en/Prompt7.wav", "/media/pi/WONDERPHONE/prompts/en/Ready7.wav"])
-			# Spanish selected --> Personal Prompt
-			elif MENU == 2:
-				if DEBUG_PRESSED:
-					print("27 Personal Prompt. (Spanish)")
-					logger.debug("27")
-				MENU = 27
-				play_wav(["/media/pi/WONDERPHONE/prompts/es/Menu7.wav", "/media/pi/WONDERPHONE/prompts/es/Prompt7.wav", "/media/pi/WONDERPHONE/prompts/es/Ready7.wav"])
-				
-		if btnval > 500 and btnval < 525: # 8
-			if p.poll() == None:
-				p.kill()
-			# English selected --> Personal Responses 
-			if MENU == 1:
-				if DEBUG_PRESSED:
-					print("18 Personal Responses.")
-					logger.debug("18")
-				MENU = 18
-				play_wav(["/media/pi/WONDERPHONE/prompts/en/Menu8.wav", "/media/pi/WONDERPHONE/prompts/en/Prompt8.wav", "/media/pi/WONDERPHONE/prompts/en/Finish8.wav"])
-				p.wait()
-				filename = find_file("/media/pi/WONDERPHONE/recordings/en")
-				play_wav([filename])
-				
-			# Spanish selected --> Personal Responses
-			elif MENU == 2:
-				if DEBUG_PRESSED:
-					print("28 Personal Responses. (Spanish)")
-					logger.debug("28")
-				MENU = 28
-				play_wav(["/media/pi/WONDERPHONE/prompts/es/Menu8.wav", "/media/pi/WONDERPHONE/prompts/es/Prompt8.wav", "/media/pi/WONDERPHONE/prompts/es/Finish8.wav"])
-				p.wait()
-				filename = find_file("/media/pi/WONDERPHONE/recordings/es")
-				play_wav([filename])
-				
-		if btnval > 470 and btnval < 490: # 9
-			if p.poll() == None:
-				p.kill()
-			# English selected --> Wonder Hunt
-			if MENU == 1:
-				if DEBUG_PRESSED:
-					print("19 Wonder Hunt.")
-					logger.debug("19")
-				MENU = 19
-				play_wav(["/media/pi/WONDERPHONE/prompts/en/Menu9.wav", "/media/pi/WONDERPHONE/prompts/en/Prompt9.wav"])
-			# Spanish selected --> Wonder Hunt
-			elif MENU == 2:
-				if DEBUG_PRESSED:
-					print("29 Wonder Hunt. (Spanish)")
-					logger.debug("29")
-				MENU = 29
-				play_wav(["/media/pi/WONDERPHONE/prompts/es/Menu9.wav", "/media/pi/WONDERPHONE/prompts/es/Prompt9.wav"])
-				
-		if btnval > 420 and btnval < 440: # 0
-			if p.poll() == None:
-				p.kill()
-			# English selected --> About Wonderphone
-			if MENU == 1:
-				if DEBUG_PRESSED:
-					print("10 About Wonderphone.")
-					logger.debug("10")
-				MENU = 10
-				play_wav(["/media/pi/WONDERPHONE/prompts/en/Menu10.wav"])
-			# Spanish selected --> About Wonderphone
-			elif MENU == 2:
-				if DEBUG_PRESSED:
-					print("20 About Wonderphone. (Spanish)")
-					logger.debug("20")
-				MENU = 20
-				play_wav(["/media/pi/WONDERPHONE/prompts/es/Menu10.wav"])
-				
-		if btnval > 445 and btnval < 470: # star
-			try:
-				if p.poll() == None:
-					p.kill()
-			except NameError:
-				print ("p doesn't exist")
-			try:
-				if r.poll() == None:
-					r.kill()
-			except NameError:
-				print ("r doesn't exist")
-			# English selected --> Return to English menu
-			if MENU < 20 and MENU >= 10  or MENU >= 100 and MENU < 200:
-				if DEBUG_PRESSED:
-					print("STAR Return to English menu.")
-					logger.debug("STAR")
-					print("English Menu.")
-					logger.debug("English Menu.")
-				play_wav(["/media/pi/WONDERPHONE/prompts/en/MainMenu.wav"])
-				MENU = 1
-			# Spanish selected --> Return to Spanish menu
-			elif MENU < 30 and MENU >= 20 or MENU >= 200 and MENU < 300:
-				if DEBUG_PRESSED:
-					print("STAR Return to Spanish menu.")
-					logger.debug("STAR")
-					print("Spanish Menu.")
-					logger.debug("Spanish Menu.")
-				play_wav(["/media/pi/WONDERPHONE/prompts/es/MainMenu.wav"])
-				MENU = 2
-		
-		if btnval > 390 and btnval < 420: # pound
-			try:
-				if p.poll() == None:
-					p.kill()
-			except NameError:
-				print ("p doesn't exist")
-			try:
-				if r.poll() == None:
-					r.kill()
-			except NameError:
-				print ("r doesn't exist")
-			# English selected --> Return to English menu
-			if MENU < 20 and MENU >= 10  or MENU >= 100 and MENU < 200:
-				if DEBUG_PRESSED:
-					print("POUND Return to English menu.")
-					logger.debug("POUND")
-					print("English Menu.")
-					logger.debug("English Menu.")
-				play_wav(["/media/pi/WONDERPHONE/prompts/en/MainMenu.wav"])
-				MENU = 1
-			# Spanish selected --> Return to Spanish menu
-			elif MENU < 30 and MENU >= 20 or MENU >= 200 and MENU < 300:
-				if DEBUG_PRESSED:
-					print("POUND Return to Spanish menu.")
-					logger.debug("POUND")
-					print("Spanish Menu.")
-					logger.debug("Spanish Menu.")
-				play_wav(["/media/pi/WONDERPHONE/prompts/es/MainMenu.wav"])
-				MENU = 2
+	# Reset global vars
+	MENU = []
+	PLAYBACK_INDEX = 0
+	IS_FIRST_PLAYBACK = True
 
-# phone_hook: start the phone menu on switch off
-def phone_hook(channel):
-	global MENU
 	hookval = GPIO.input(HOOK) # check value of hook switch
 
 	if DEBUG_HOOK:
@@ -436,49 +142,149 @@ def phone_hook(channel):
 	if DEBUG_PRESSED:
 		print("Main Menu.")
 		logger.debug("Main Menu.")
-	MENU = -1
+
 	try:
-		if p.poll() == None:
-			p.kill()
+		if playback_process.poll() == None:
+			playback_process.kill()
 			print("MEF: ending current playback; returning to main menu")
 	except NameError:
-		print("MEF: error; p does not exist")
+		print("MEF: error; playback_process does not exist")
 
 	# TODO: STARTING WAV HERE
-	wav_file = "/media/pi/WONDERPHONE/prompts/languageselect.wav"
-	play_wav([wav_file])
+	# wav_file = "/media/pi/WONDERPHONE/prompts/languageselect.wav"
+	# play_wav([wav_file])
+	print("Hello and welcome to the Wonderphone!")
+	print("Main Menu. Press 1 to record a new message. Press 2 to playback messages.")
+
+def navigate_menu(last_key_pressed):
+	global MENU
+	global PLAYBACK_INDEX
+	global IS_FIRST_PLAYBACK
+
+	MENU.append(last_key_pressed)
+	print(last_key_pressed)
+
+	unresolved_input = True
+	while (unresolved_input):
+		print(MENU)
+		if MENU == ["1"]:
+			print("Record a message. You will have thirty seconds to record, so make it count! Start your message after the beep. *BEEP*")
+			# Record a message
+			print("Recording Ended.")
+			print("To re-record your message, press 1. To review your message, press 2. To save your message, press #. To discard your message and return to the main menu, press 0.")
+			unresolved_input = False
+		elif MENU == ["1", "1"]:
+			MENU.pop()
+		elif MENU == ["1","2"]:
+			# Playback message
+			MENU.pop()
+			print("To re-record your message, press 1. To review your message, press 2. To save your message, press #. To discard your message and return to the main menu, press 0.")
+			unresolved_input = False
+		elif MENU == ["1","0"]:
+			unresolved_input = False
+			restart(HOOK)
+		elif MENU == ["1","#"]:
+			# Save message
+			print("Message saved. Returning to Main Menu.")
+			unresolved_input = False
+			restart(HOOK)
+		elif MENU == ["2"]:
+			if IS_FIRST_PLAYBACK:
+				print("Playback messages. Messages will be played in chronological order.")
+				IS_FIRST_PLAYBACK = False
+			print(PLAYBACK_INDEX)
+			# if at last message, print("Last message.")
+			# Playback @ PLAYBACK_INDEX
+			# if at last message, print("Press 1 to replay the message. Press 0 to return to return to the main menu.")
+			# else:
+			print("Press 1 to replay the message. Press 2 to continue to the next message. Press 0 to return to return to the main menu.")
+			unresolved_input = False
+		elif MENU == ["2","1"]:
+			print("Replay message.")
+			MENU.pop()
+		elif MENU == ["2", "2"]:
+			# if PLAYBACK_INDEX > saved_messages.len(): print("No messages left.")
+			# else:
+			print("Next message.")
+			PLAYBACK_INDEX += 1
+			# endelse
+			MENU.pop()
+		elif MENU == ["2", "0"]:
+			unresolved_input = False
+			restart(HOOK)
+		else:
+			MENU.pop()
+			unresolved_input = False
+
+#------------------------------------------ KEYPAD ------------------------------------------
+
+# determine what to do when a button is pressed
+def button_handler(channel):
+	global MENU
+	if phoneIsOffHook():
+		btnval = readadc(0, SPICLK, SPIMOSI, SPIMISO, SPICS) # check raw value of ADC
+		if DEBUG_RAWADC:
+			print ("btnval:", btnval)
+		
+		# Associate numeric press with ADC value
+		# These are not perfect, imperfections due to connecting wires may be unstable and unreliable.
+		if btnval > 960: # 1
+			navigate_menu("1")
+		if btnval > 870 and btnval < 910: # 2
+			navigate_menu("2")
+		if btnval > 760 and btnval < 810: # 3
+			navigate_menu("3")
+		if btnval > 700 and btnval < 750: # 4
+			navigate_menu("4")
+		if btnval > 650 and btnval < 670: # 5
+			navigate_menu("5")
+		if btnval > 580 and btnval < 610: # 6
+			navigate_menu("6")
+		if btnval > 540 and btnval < 570: # 7
+			navigate_menu("7")
+		if btnval > 500 and btnval < 525: # 8
+			navigate_menu("8")
+		if btnval > 470 and btnval < 490: # 9	
+			navigate_menu("9")
+		if btnval > 420 and btnval < 440: # 0
+			navigate_menu("0")
+		if btnval > 445 and btnval < 470: # star
+			navigate_menu("*")
+		if btnval > 390 and btnval < 420: # pound
+			navigate_menu("#")
+
 
 def main():
 	try:
-		phone_hook(HOOK)
+		restart(HOOK) # When the phone is picked up:
 		logger.debug("---------PROGRAM START---------")
 		print("Waiting for action...")
-		GPIO.add_event_detect(PRESSED, GPIO.RISING, callback=button_pressed, bouncetime=500) # look for button presses
-		GPIO.add_event_detect(HOOK, GPIO.BOTH, callback=phone_hook, bouncetime=100) # look for phone on hook
+		GPIO.add_event_detect(PRESSED, GPIO.RISING, callback=button_handler, bouncetime=500) # look for button presses
+		GPIO.add_event_detect(HOOK, GPIO.BOTH, callback=restart, bouncetime=100) # look for phone on hook
 		GPIO.wait_for_edge(EXIT, GPIO.RISING) # wait for exit button
 		print("Quitting program.")
 		logger.debug("----------PROGRAM END----------")
 		try:
-			if p.poll() == None:
-				p.kill()
+			if playback_process.poll() == None: 	# If the process is still running... 
+				playback_process.kill()				# kill it
 		except NameError:
-			print ("p doesn't exist")
+			print ("playback_process doesn't exist")
 		try:
-			if r.poll() == None:
-				r.kill()
+			if recording_process.poll() == None:
+				recording_process.kill()
 		except NameError:
-			print ("r doesn't exist")
+			print ("recording_process doesn't exist")
 	except KeyboardInterrupt:
 		try:
-			if p.poll() == None:
-				p.kill()
+			if playback_process.poll() == None:
+				playback_process.kill()
 		except NameError:
-			print ("p doesn't exist")
+			print ("playback_process doesn't exist")
 		try:
-			if r.poll() == None:
-				r.kill()
+			if recording_process.poll() == None:
+				recording_process.kill()
 		except NameError:
-			print ("r doesn't exist")
+			print ("recording_process doesn't exist")
 		GPIO.cleanup()		# clean up GPIO on CTRL+C exit
 	sys.exit(0)				# system exit
 	GPIO.cleanup()			# clean up GPIO on normal exit
