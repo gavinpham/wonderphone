@@ -6,7 +6,7 @@
 
 import time, os, sys, subprocess, signal, logging, math
 import RPi.GPIO as GPIO
-from os import listdir
+from os import listdir, remove
 from os.path import isfile, join
 
 GPIO.setmode(GPIO.BCM)
@@ -73,13 +73,14 @@ GPIO.setup(HOOK, GPIO.IN, pull_up_down = GPIO.PUD_DOWN)
 GPIO.setup(EXIT, GPIO.IN, pull_up_down = GPIO.PUD_UP)
 
 # DEBUG CONSTANTS
-DEBUG_RAWADC 	= 1
+DEBUG_RAWADC 	= 0
 DEBUG_PRESSED 	= 1
 DEBUG_HOOK 		= 1
 
 # GLOBAL VARS
 MENU = []
 PLAYBACK_INDEX = 0
+SHOULD_PLAY_GREETINGS = True
 
 #------------------------------------------ UTILITY FUNCTIONS ------------------------------------------
 
@@ -89,10 +90,10 @@ def phoneIsOffHook():
 
 # Play wav file on the attached system sound device
 def play_wav(wav_filename):
-	global playback_process
+	global p
 	msg = "playing " + ", ".join(wav_filename)
 	logger.debug(msg)
-	playback_process = subprocess.Popen(
+	p = subprocess.Popen(
 		['aplay','-i','-D','plughw:1'] + wav_filename,
 		stdin = subprocess.PIPE,
 		stdout = subprocess.PIPE,
@@ -102,33 +103,24 @@ def play_wav(wav_filename):
 
 # record wav file on the attached system sound device
 def record_wav(wav_filename):
-	global recording_process
-	recording_process = subprocess.Popen(
+	global r
+	r = subprocess.Popen(
 		['arecord','-f','cd','-d','30','-t','wav','-D','plughw:1','--max-file-time','30',wav_filename],
 		stdin = subprocess.PIPE,
 		stdout = subprocess.PIPE,
 		stderr = subprocess.STDOUT,
 		shell = False
 	)
-	print(recording_process.stdout.read())
+	print(r.stdout.read())
 
-# find a random file in the recordings to play
-def find_file(path):
-	files = [f for f in listdir(path) if isfile(join(path, f))]
-	#print files
-	#print len(files)
-	x = 0
-	x = randrange(len(files))
-	#print x
-	filename = path + "/" + files[x]
-	#print(filename)
-	return filename
-
-# restart: return to main menu.
-def restart(channel):
+#soft_reset: return to the main menu
+def soft_reset(channel): 
 	global MENU
 	global PLAYBACK_INDEX
+	global SHOULD_PLAY_GREETINGS
 	global IS_FIRST_PLAYBACK
+	global p
+	global r
 	
 	# Reset global vars
 	MENU = []
@@ -140,78 +132,147 @@ def restart(channel):
 	if DEBUG_HOOK:
 		print(hookval, "Phone off hook.")
 	if DEBUG_PRESSED:
-		print("Main Menu.")
 		logger.debug("Main Menu.")
 
 	try:
-		if playback_process.poll() == None:
-			playback_process.kill()
+		if p.poll() == None:
+			p.kill()
 			print("MEF: ending current playback; returning to main menu")
 	except NameError:
-		print("MEF: error; playback_process does not exist")
+		print("MEF: error; p does not exist")
 
-	# TODO: STARTING WAV HERE
-	# wav_file = "/media/pi/WONDERPHONE/prompts/languageselect.wav"
-	# play_wav([wav_file])
-	print("Hello and welcome to the Wonderphone!")
+	if SHOULD_PLAY_GREETINGS:
+		print("Hello and welcome to the Wonderphone!")
+		play_wav(["/media/pi/WONDERPHONE/katies_phone_prompts/greetings_message.wav"])
+		p.wait()
+		SHOULD_PLAY_GREETINGS = False
 	print("Main Menu. Press 1 to record a new message. Press 2 to playback messages.")
+	play_wav(["/media/pi/WONDERPHONE/katies_phone_prompts/main_menu.wav"])
+
+# restart: only triggered on full hang-up to refresh greeting message
+def restart(channel):
+	global SHOULD_PLAY_GREETINGS
+	SHOULD_PLAY_GREETINGS = True
+	soft_reset(channel)
 
 def navigate_menu(last_key_pressed):
 	global MENU
 	global PLAYBACK_INDEX
 	global IS_FIRST_PLAYBACK
+	global p
+	global r
+
+	# End any current running audio, if any.
+	try:
+		if p.poll() == None:
+			p.kill()
+	except NameError:
+		print("p doesn't exist")
 
 	MENU.append(last_key_pressed)
-	print(last_key_pressed)
+	print("------------------------------------------") # Separator for output
+	print("Key pressed: " + last_key_pressed)
+
+	recordings_list = os.listdir("/media/pi/WONDERPHONE/katies_recordings/")
+	recordings_list.sort(reverse=True) #Sorts for chronological order
+	print("recordings_list: ")
+	print(recordings_list)
 
 	unresolved_input = True
 	while (unresolved_input):
+		print("Current menu stack:")
 		print(MENU)
 		if MENU == ["1"]:
 			print("Record a message. You will have thirty seconds to record, so make it count! Start your message after the beep. *BEEP*")
-			# Record a message
+			play_wav(["/media/pi/WONDERPHONE/katies_phone_prompts/new_recording_instructions.wav"])
+			p.wait()
+			savename = "/media/pi/WONDERPHONE/katies_recordings/recording_#_" + str(len(recordings_list) + 1) + ".wav"
+			print("Recording started.")
+			logger.debug("recording started")
+			record_wav(savename)
 			print("Recording Ended.")
+			logger.debug("recording stopped")
 			print("To re-record your message, press 1. To review your message, press 2. To save your message, press #. To discard your message and return to the main menu, press 0.")
+			play_wav(["/media/pi/WONDERPHONE/katies_phone_prompts/recording_ended.wav", "/media/pi/WONDERPHONE/katies_phone_prompts/post_recording_instructions.wav"])
 			unresolved_input = False
 		elif MENU == ["1", "1"]:
+			# Delete the newest recorded file
+			if os.path.isfile("/media/pi/WONDERPHONE/katies_recordings/" + recordings_list[0]):
+			    os.remove("/media/pi/WONDERPHONE/katies_recordings/" + recordings_list[0])
+			else:
+			    print("Error: %s file not found" % myfile)
 			MENU.pop()
 		elif MENU == ["1","2"]:
-			# Playback message
+			print("playing: " + recordings_list[0])
+			play_wav(["/media/pi/WONDERPHONE/katies_recordings/" + recordings_list[0]])
+			p.wait()
 			MENU.pop()
 			print("To re-record your message, press 1. To review your message, press 2. To save your message, press #. To discard your message and return to the main menu, press 0.")
+			play_wav(["/media/pi/WONDERPHONE/katies_phone_prompts/post_recording_instructions.wav"])
 			unresolved_input = False
 		elif MENU == ["1","0"]:
+			# Delete the newest recorded file
+			if os.path.isfile("/media/pi/WONDERPHONE/katies_recordings/" + recordings_list[0]):
+			    os.remove("/media/pi/WONDERPHONE/katies_recordings/" + recordings_list[0])
+			else:
+			    print("Error: %s file not found" % myfile)
 			unresolved_input = False
-			restart(HOOK)
+			soft_reset(HOOK)
 		elif MENU == ["1","#"]:
-			# Save message
 			print("Message saved. Returning to Main Menu.")
+			play_wav(["/media/pi/WONDERPHONE/katies_phone_prompts/recording_saved.wav"])
+			p.wait()
 			unresolved_input = False
-			restart(HOOK)
+			soft_reset(HOOK)
 		elif MENU == ["2"]:
-			if IS_FIRST_PLAYBACK:
-				print("Playback messages. Messages will be played in chronological order.")
-				IS_FIRST_PLAYBACK = False
-			print(PLAYBACK_INDEX)
-			# if at last message, print("Last message.")
-			# Playback @ PLAYBACK_INDEX
-			# if at last message, print("Press 1 to replay the message. Press 0 to return to return to the main menu.")
-			# else:
-			print("Press 1 to replay the message. Press 2 to continue to the next message. Press 0 to return to return to the main menu.")
+			if len(recordings_list) == 0:
+				print("There are no saved messages. Try and make one of your own!")
+				play_wav(["/media/pi/WONDERPHONE/katies_phone_prompts/no_messages.wav"])
+				p.wait()
+				unresolved_input = False
+				soft_reset(HOOK)
+			else: 
+				if IS_FIRST_PLAYBACK:
+					print("Playback messages. Messages will be played in chronological order.")
+					play_wav(["/media/pi/WONDERPHONE/katies_phone_prompts/playback_introduction.wav"])
+					p.wait()
+					IS_FIRST_PLAYBACK = False
+				print("Playback index: ")
+				print(PLAYBACK_INDEX)
+				if len(recordings_list) - 1 == PLAYBACK_INDEX:
+					print("Last message.")
+					play_wav(["/media/pi/WONDERPHONE/katies_phone_prompts/last_message.wav"])
+					p.wait()	
+				play_wav(["/media/pi/WONDERPHONE/katies_recordings/" + recordings_list[PLAYBACK_INDEX]])
+				p.wait()
+				if len(recordings_list) - 1 == PLAYBACK_INDEX:
+					print("Press 1 to replay the message. Press 0 to return to return to the main menu.")
+					play_wav(["/media/pi/WONDERPHONE/katies_phone_prompts/playback_last_message_instructions.wav"])
+				else:
+					print("Press 1 to replay the message. Press 2 to continue to the next message. Press 0 to return to the main menu.")
+					play_wav(["/media/pi/WONDERPHONE/katies_phone_prompts/playback_instructions.wav"])
 			unresolved_input = False
 		elif MENU == ["2","1"]:
 			print("Replay message.")
+			play_wav(["/media/pi/WONDERPHONE/katies_phone_prompts/replay_message.wav"])
+			p.wait()
 			MENU.pop()
 		elif MENU == ["2", "2"]:
-			# if PLAYBACK_INDEX > saved_messages.len(): print("No messages left.")
-			# else:
-			print("Next message.")
-			PLAYBACK_INDEX += 1
-			# endelse
+			if PLAYBACK_INDEX > len(recordings_list): 
+				print("No messages left.")
+				play_wav(["/media/pi/WONDERPHONE/katies_phone_prompts/no_messages_left.wav"])
+				p.wait()
+				unresolved_input = False
+				soft_reset(HOOK)
+			else:
+				print("Next message.")
+				play_wav(["/media/pi/WONDERPHONE/katies_phone_prompts/next_message.wav"])
+				p.wait()
+				PLAYBACK_INDEX += 1
 			MENU.pop()
 		elif MENU == ["2", "0"]:
 			unresolved_input = False
-			restart(HOOK)
+			soft_reset(HOOK)
 		else:
 			MENU.pop()
 			unresolved_input = False
@@ -260,31 +321,31 @@ def main():
 		logger.debug("---------PROGRAM START---------")
 		print("Waiting for action...")
 		GPIO.add_event_detect(PRESSED, GPIO.RISING, callback=button_handler, bouncetime=500) # look for button presses
-		GPIO.add_event_detect(HOOK, GPIO.BOTH, callback=restart, bouncetime=100) # look for phone on hook
+		GPIO.add_event_detect(HOOK, GPIO.BOTH, callback=restart, bouncetime=3000) # look for phone on hook
 		GPIO.wait_for_edge(EXIT, GPIO.RISING) # wait for exit button
 		print("Quitting program.")
 		logger.debug("----------PROGRAM END----------")
 		try:
-			if playback_process.poll() == None: 	# If the process is still running... 
-				playback_process.kill()				# kill it
+			if p.poll() == None: 	# If the process is still running... 
+				p.kill()				# kill it
 		except NameError:
-			print ("playback_process doesn't exist")
+			print ("p doesn't exist")
 		try:
-			if recording_process.poll() == None:
-				recording_process.kill()
+			if r.poll() == None:
+				r.kill()
 		except NameError:
-			print ("recording_process doesn't exist")
+			print ("r doesn't exist")
 	except KeyboardInterrupt:
 		try:
-			if playback_process.poll() == None:
-				playback_process.kill()
+			if p.poll() == None:
+				p.kill()
 		except NameError:
-			print ("playback_process doesn't exist")
+			print ("p doesn't exist")
 		try:
-			if recording_process.poll() == None:
-				recording_process.kill()
+			if r.poll() == None:
+				r.kill()
 		except NameError:
-			print ("recording_process doesn't exist")
+			print ("r doesn't exist")
 		GPIO.cleanup()		# clean up GPIO on CTRL+C exit
 	sys.exit(0)				# system exit
 	GPIO.cleanup()			# clean up GPIO on normal exit
