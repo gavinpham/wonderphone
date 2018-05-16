@@ -58,6 +58,7 @@ SPICLK 	= 18
 SPIMISO = 23
 SPIMOSI = 24
 SPICS 	= 25
+GPIO.setwarnings(False)
 GPIO.setup(SPIMOSI, GPIO.OUT)
 GPIO.setup(SPIMISO, GPIO.IN)
 GPIO.setup(SPICLK, GPIO.OUT)
@@ -76,6 +77,7 @@ GPIO.setup(EXIT, GPIO.IN, pull_up_down = GPIO.PUD_UP)
 DEBUG_RAWADC 	= 0
 DEBUG_PRESSED 	= 1
 DEBUG_HOOK 		= 1
+DEBUG_VERBOSE_OUTPUT = 1
 
 # GLOBAL VARS
 MENU = []
@@ -142,11 +144,13 @@ def soft_reset(channel):
 		print("MEF: error; p does not exist")
 
 	if SHOULD_PLAY_GREETINGS:
-		print("Hello and welcome to the Wonderphone!")
+		if DEBUG_VERBOSE_OUTPUT:
+			print("Hello and welcome to the Wonderphone!")
 		play_wav(["/media/pi/WONDERPHONE/katies_phone_prompts/greetings_message.wav"])
 		p.wait()
 		SHOULD_PLAY_GREETINGS = False
-	print("Main Menu. Press 1 to record a new message. Press 2 to playback messages.")
+	if DEBUG_VERBOSE_OUTPUT:
+		print("Main Menu. Press 1 to record a new message. Press 2 to playback messages.")
 	play_wav(["/media/pi/WONDERPHONE/katies_phone_prompts/main_menu.wav"])
 
 # restart: only triggered on full hang-up to refresh greeting message
@@ -171,28 +175,28 @@ def navigate_menu(last_key_pressed):
 
 	MENU.append(last_key_pressed)
 	print("------------------------------------------") # Separator for output
-	print("Key pressed: " + last_key_pressed)
+	if DEBUG_PRESSED:
+		print("Key pressed: " + last_key_pressed)
 
 	recordings_list = os.listdir("/media/pi/WONDERPHONE/katies_recordings/")
 	recordings_list.sort(reverse=True) #Sorts for chronological order
-	print("recordings_list: ")
-	print(recordings_list)
+	print("recordings_list: ", recordings_list)
 
 	unresolved_input = True
 	while (unresolved_input):
-		print("Current menu stack:")
-		print(MENU)
+		print("Current menu stack:", MENU)
 		if MENU == ["1"]:
-			print("Record a message. You will have thirty seconds to record, so make it count! Start your message after the beep. *BEEP*")
+			if DEBUG_VERBOSE_OUTPUT:
+				print("Record a message. You will have thirty seconds to record, so make it count! Start your message after the beep. *BEEP*")
 			play_wav(["/media/pi/WONDERPHONE/katies_phone_prompts/new_recording_instructions.wav"])
 			p.wait()
 			savename = "/media/pi/WONDERPHONE/katies_recordings/recording_#_" + str(len(recordings_list) + 1) + ".wav"
-			print("Recording started.")
-			logger.debug("recording started")
+			print("Recording Started.")
 			record_wav(savename)
-			print("Recording Ended.")
-			logger.debug("recording stopped")
-			print("To re-record your message, press 1. To review your message, press 2. To save your message, press #. To discard your message and return to the main menu, press 0.")
+			if DEBUG_VERBOSE_OUTPUT:
+				print("Recording Ended.")
+			if DEBUG_VERBOSE_OUTPUT:
+				print("To re-record your message, press 1. To review your message, press 2. To save your message, press #. To discard your message and return to the main menu, press 0.")
 			play_wav(["/media/pi/WONDERPHONE/katies_phone_prompts/recording_ended.wav", "/media/pi/WONDERPHONE/katies_phone_prompts/post_recording_instructions.wav"])
 			unresolved_input = False
 		elif MENU == ["1", "1"]:
@@ -207,7 +211,8 @@ def navigate_menu(last_key_pressed):
 			play_wav(["/media/pi/WONDERPHONE/katies_recordings/" + recordings_list[0]])
 			p.wait()
 			MENU.pop()
-			print("To re-record your message, press 1. To review your message, press 2. To save your message, press #. To discard your message and return to the main menu, press 0.")
+			if DEBUG_VERBOSE_OUTPUT:
+				print("To re-record your message, press 1. To review your message, press 2. To save your message, press #. To discard your message and return to the main menu, press 0.")
 			play_wav(["/media/pi/WONDERPHONE/katies_phone_prompts/post_recording_instructions.wav"])
 			unresolved_input = False
 		elif MENU == ["1","0"]:
@@ -219,53 +224,62 @@ def navigate_menu(last_key_pressed):
 			unresolved_input = False
 			soft_reset(HOOK)
 		elif MENU == ["1","#"]:
-			print("Message saved. Returning to Main Menu.")
+			if DEBUG_VERBOSE_OUTPUT:
+				print("Message saved. Returning to Main Menu.")
 			play_wav(["/media/pi/WONDERPHONE/katies_phone_prompts/recording_saved.wav"])
 			p.wait()
 			unresolved_input = False
 			soft_reset(HOOK)
 		elif MENU == ["2"]:
 			if len(recordings_list) == 0:
-				print("There are no saved messages. Try and make one of your own!")
+				if DEBUG_VERBOSE_OUTPUT:
+					print("There are no saved messages. Try and make one of your own!")
 				play_wav(["/media/pi/WONDERPHONE/katies_phone_prompts/no_messages.wav"])
 				p.wait()
 				unresolved_input = False
 				soft_reset(HOOK)
 			else: 
 				if IS_FIRST_PLAYBACK:
-					print("Playback messages. Messages will be played in chronological order.")
+					if DEBUG_VERBOSE_OUTPUT:
+						print("Playback messages. Messages will be played in chronological order.")
 					play_wav(["/media/pi/WONDERPHONE/katies_phone_prompts/playback_introduction.wav"])
 					p.wait()
 					IS_FIRST_PLAYBACK = False
 				print("Playback index: ")
 				print(PLAYBACK_INDEX)
 				if len(recordings_list) - 1 == PLAYBACK_INDEX:
-					print("Last message.")
+					if DEBUG_VERBOSE_OUTPUT:
+						print("Last message.")
 					play_wav(["/media/pi/WONDERPHONE/katies_phone_prompts/last_message.wav"])
 					p.wait()	
 				play_wav(["/media/pi/WONDERPHONE/katies_recordings/" + recordings_list[PLAYBACK_INDEX]])
 				p.wait()
 				if len(recordings_list) - 1 == PLAYBACK_INDEX:
-					print("Press 1 to replay the message. Press 0 to return to return to the main menu.")
+					if DEBUG_VERBOSE_OUTPUT:
+						print("Press 1 to replay the message. Press 0 to return to return to the main menu.")
 					play_wav(["/media/pi/WONDERPHONE/katies_phone_prompts/playback_last_message_instructions.wav"])
 				else:
-					print("Press 1 to replay the message. Press 2 to continue to the next message. Press 0 to return to the main menu.")
+					if DEBUG_VERBOSE_OUTPUT:
+						print("Press 1 to replay the message. Press 2 to continue to the next message. Press 0 to return to the main menu.")
 					play_wav(["/media/pi/WONDERPHONE/katies_phone_prompts/playback_instructions.wav"])
 			unresolved_input = False
 		elif MENU == ["2","1"]:
-			print("Replay message.")
+			if DEBUG_VERBOSE_OUTPUT:
+				print("Replay message.")
 			play_wav(["/media/pi/WONDERPHONE/katies_phone_prompts/replay_message.wav"])
 			p.wait()
 			MENU.pop()
 		elif MENU == ["2", "2"]:
 			if PLAYBACK_INDEX > len(recordings_list): 
-				print("No messages left.")
+				if DEBUG_VERBOSE_OUTPUT:
+					print("No messages left.")
 				play_wav(["/media/pi/WONDERPHONE/katies_phone_prompts/no_messages_left.wav"])
 				p.wait()
 				unresolved_input = False
 				soft_reset(HOOK)
 			else:
-				print("Next message.")
+				if DEBUG_VERBOSE_OUTPUT:
+					print("Next message.")
 				play_wav(["/media/pi/WONDERPHONE/katies_phone_prompts/next_message.wav"])
 				p.wait()
 				PLAYBACK_INDEX += 1
